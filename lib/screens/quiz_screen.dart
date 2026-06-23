@@ -272,16 +272,18 @@ class _QuizScreenState extends State<QuizScreen> {
   }
 
   void _processAnswerResult(bool isCorrect) {
-    if (isCorrect) {
-      _score++;
-      _consecutiveCorrect++;
-      if (_consecutiveCorrect >= 2) {
-        _levelUpDifficulty();
+    setState(() {
+      if (isCorrect) {
+        _score++;
+        _consecutiveCorrect++;
+        if (_consecutiveCorrect >= 2) {
+          _levelUpDifficulty();
+        }
+      } else {
+        _consecutiveCorrect = 0;
+        _levelDownDifficulty();
       }
-    } else {
-      _consecutiveCorrect = 0;
-      _levelDownDifficulty();
-    }
+    });
 
     final card = _quizQuestions[_currentIndex].flashcard;
     if (card.id.isNotEmpty && !card.id.startsWith('api-')) {
