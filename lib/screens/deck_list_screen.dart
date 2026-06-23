@@ -13,6 +13,7 @@ import '../providers/deck_provider.dart';
 import '../providers/social_provider.dart';
 import 'flashcard_list_screen.dart';
 import '../utils/neumorphic_widgets.dart';
+import '../utils/custom_snackbar.dart';
 
 // Shared gradient palette — one source of truth for both the card icon and
 // any future uses (e.g. a hero animation background).
@@ -205,7 +206,7 @@ class _DeckListScreenState extends State<DeckListScreen> {
 
     showDialog(
       context: context,
-      builder: (context) => _DeckFormDialog(
+      builder: (dialogContext) => _DeckFormDialog(
         title: 'Create new deck',
         confirmLabel: 'Create',
         titleController: titleController,
@@ -213,7 +214,16 @@ class _DeckListScreenState extends State<DeckListScreen> {
         onConfirm: () async {
           if (titleController.text.isNotEmpty) {
             await provider.addDeck(titleController.text, descController.text);
-            if (context.mounted) Navigator.pop(context);
+            if (dialogContext.mounted) {
+              Navigator.pop(dialogContext);
+            }
+            if (context.mounted) {
+              CustomSnackBar.show(
+                context,
+                message: 'Deck created successfully!',
+                type: SnackBarType.success,
+              );
+            }
           }
         },
       ),
@@ -426,7 +436,7 @@ class _DeckCard extends StatelessWidget {
     final descController = TextEditingController(text: deck.description);
     showDialog(
       context: context,
-      builder: (_) => _DeckFormDialog(
+      builder: (dialogContext) => _DeckFormDialog(
         title: 'Edit deck',
         confirmLabel: 'Save',
         titleController: titleController,
@@ -442,7 +452,16 @@ class _DeckCard extends StatelessWidget {
               isFavorite: deck.isFavorite,
             );
             await context.read<DeckProvider>().updateDeck(updatedDeck);
-            if (context.mounted) Navigator.pop(context);
+            if (dialogContext.mounted) {
+              Navigator.pop(dialogContext);
+            }
+            if (context.mounted) {
+              CustomSnackBar.show(
+                context,
+                message: 'Deck updated successfully!',
+                type: SnackBarType.success,
+              );
+            }
           }
         },
       ),
@@ -452,7 +471,7 @@ class _DeckCard extends StatelessWidget {
   void _confirmDeleteDeck(BuildContext context, Deck deck) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         title: const Text('Delete deck?'),
         content: Text(
@@ -460,13 +479,22 @@ class _DeckCard extends StatelessWidget {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
             onPressed: () async {
-              await context.read<DeckProvider>().deleteDeck(deck.id);
-              if (context.mounted) Navigator.pop(context);
+              final navigator = Navigator.of(dialogContext);
+              final deckProvider = context.read<DeckProvider>();
+              await deckProvider.deleteDeck(deck.id);
+              navigator.pop();
+              if (context.mounted) {
+                CustomSnackBar.show(
+                  context,
+                  message: 'Deck deleted successfully!',
+                  type: SnackBarType.success,
+                );
+              }
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.redAccent,
