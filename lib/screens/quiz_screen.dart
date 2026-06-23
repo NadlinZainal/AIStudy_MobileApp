@@ -58,6 +58,7 @@ class _QuizScreenState extends State<QuizScreen> {
   List<String> _currentOptions = [];
   bool _isPreloading = true;
   final Map<String, List<String>> _preloadedDistractors = {};
+  final List<Future<void>> _pendingSrsUpdates = [];
 
   // Adaptive Difficulty Fields
   QuizDifficulty _currentDifficulty = QuizDifficulty.easy;
@@ -259,7 +260,14 @@ class _QuizScreenState extends State<QuizScreen> {
 
     final card = _quizQuestions[_currentIndex].flashcard;
     if (card.id.isNotEmpty && !card.id.startsWith('api-')) {
-      context.read<DeckProvider>().updateFlashcardSRS(card, 4);
+      final updatedCard = card.updateSRS(4);
+      for (int i = 0; i < _shuffledCards.length; i++) {
+        if (_shuffledCards[i].id == card.id) {
+          _shuffledCards[i] = updatedCard;
+        }
+      }
+      final future = context.read<DeckProvider>().updateFlashcardSRS(card, 4);
+      _pendingSrsUpdates.add(future);
     }
   }
 
@@ -277,7 +285,14 @@ class _QuizScreenState extends State<QuizScreen> {
 
     final card = _quizQuestions[_currentIndex].flashcard;
     if (card.id.isNotEmpty && !card.id.startsWith('api-')) {
-      context.read<DeckProvider>().updateFlashcardSRS(card, isCorrect ? 4 : 1);
+      final updatedCard = card.updateSRS(isCorrect ? 4 : 1);
+      for (int i = 0; i < _shuffledCards.length; i++) {
+        if (_shuffledCards[i].id == card.id) {
+          _shuffledCards[i] = updatedCard;
+        }
+      }
+      final future = context.read<DeckProvider>().updateFlashcardSRS(card, isCorrect ? 4 : 1);
+      _pendingSrsUpdates.add(future);
     }
   }
 
@@ -334,20 +349,44 @@ class _QuizScreenState extends State<QuizScreen> {
     );
   }
 
-  void _nextTask() {
-    setState(() {
-      if (_currentIndex < _shuffledCards.length - 1) {
+  void _nextTask() async {
+    if (_currentIndex < _shuffledCards.length - 1) {
+      setState(() {
         _currentIndex++;
         _prepareCurrentTask();
-      } else {
+      });
+    } else {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      try {
+        await Future.wait(_pendingSrsUpdates);
+      } catch (e) {
+        debugPrint("Error waiting for quiz updates: $e");
+      }
+
+      if (mounted) {
+        Navigator.pop(context); // Close loading indicator
+        
         final userId = context.read<AuthProvider>().user?.id;
         if (userId != null) {
           final duration = DateTime.now().difference(_startTime).inSeconds;
-          context.read<DeckProvider>().saveQuizSession(userId, widget.deck.id, _score, _shuffledCards.length, duration);
+          await context.read<DeckProvider>().saveQuizSession(
+            userId,
+            widget.deck.id,
+            _score,
+            _shuffledCards.length,
+            duration,
+          );
         }
         _showResultDialog();
       }
-    });
+    }
   }
 
   bool isCloseMatch(String input, String expected) {

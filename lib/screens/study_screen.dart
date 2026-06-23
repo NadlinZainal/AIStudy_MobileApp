@@ -35,32 +35,63 @@ class _StudyScreenState extends State<StudyScreen> {
     if (quality >= 3) _score++;
     
     final currentCard = _shuffledCards[_currentIndex];
-    context.read<DeckProvider>().updateFlashcardSRS(currentCard, quality);
+    final updatedCard = currentCard.updateSRS(quality);
+
+    // Update local list items to prevent stale interval calculations
+    for (int i = 0; i < _shuffledCards.length; i++) {
+      if (_shuffledCards[i].id == currentCard.id) {
+        _shuffledCards[i] = updatedCard;
+      }
+    }
+
+    final srsUpdateFuture = context.read<DeckProvider>().updateFlashcardSRS(currentCard, quality);
 
     setState(() {
       _isFlipped = false;
       _cardKey = GlobalKey<FlipCardState>(); // Recreate key to force reset next card to front
 
       if (quality < 3) {
-        // Push this card to the end of the list to try again later in this session
-        _shuffledCards.add(currentCard);
+        // Push this updated card to the end of the list to try again later in this session
+        _shuffledCards.add(updatedCard);
       }
 
       if (_currentIndex < _shuffledCards.length - 1) {
         _currentIndex++;
       } else {
-        final userId = context.read<AuthProvider>().user?.id;
-        if (userId != null) {
-          context.read<DeckProvider>().saveQuizSession(
-            userId,
-            widget.deck.id,
-            _score,
-            _shuffledCards.length,
-          );
-        }
-        _showResultDialog();
+        _showCompletionFlow(srsUpdateFuture);
       }
     });
+  }
+
+  Future<void> _showCompletionFlow(Future<dynamic> pendingUpdate) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    try {
+      await pendingUpdate;
+    } catch (e) {
+      debugPrint("Error updating last card: $e");
+    }
+
+    if (mounted) {
+      Navigator.pop(context); // Close loading indicator
+      
+      final userId = context.read<AuthProvider>().user?.id;
+      if (userId != null) {
+        await context.read<DeckProvider>().saveQuizSession(
+          userId,
+          widget.deck.id,
+          _score,
+          _shuffledCards.length,
+        );
+      }
+      _showResultDialog();
+    }
   }
 
   void _showResultDialog() {

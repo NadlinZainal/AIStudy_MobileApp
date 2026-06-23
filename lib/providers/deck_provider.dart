@@ -125,10 +125,11 @@ class DeckProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> updateFlashcardSRS(Flashcard card, int quality) async {
+  Future<Flashcard> updateFlashcardSRS(Flashcard card, int quality) async {
     final updatedCard = card.updateSRS(quality);
     await FirestoreService.instance.updateFlashcard(updatedCard);
     notifyListeners();
+    return updatedCard;
   }
 
   Future<double> getDeckProgress(String deckId) async {
