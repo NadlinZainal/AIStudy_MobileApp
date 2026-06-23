@@ -38,6 +38,16 @@ class QuizQuestion {
   });
 }
 
+class FillInBlankData {
+  final String blankedSentence;
+  final List<String> blankedWords;
+
+  FillInBlankData({
+    required this.blankedSentence,
+    required this.blankedWords,
+  });
+}
+
 class QuizScreen extends StatefulWidget {
   final Deck deck;
   final List<Flashcard> flashcards;
@@ -46,6 +56,155 @@ class QuizScreen extends StatefulWidget {
 
   @override
   State<QuizScreen> createState() => _QuizScreenState();
+
+  static bool isCloseMatch(String input, String expected) {
+    final cleanInput = input.trim().toLowerCase().replaceAll(RegExp(r'[^\w\s]'), '');
+    final cleanExpected = expected.trim().toLowerCase().replaceAll(RegExp(r'[^\w\s]'), '');
+
+    if (cleanInput == cleanExpected) return true;
+
+    final distance = _levenshtein(cleanInput, cleanExpected);
+    final maxLength = math.max(cleanInput.length, cleanExpected.length);
+    if (maxLength == 0) return true;
+    final similarity = 1.0 - (distance / maxLength);
+    return similarity >= 0.85; // Slightly tighten the similarity threshold to 85% for better accuracy
+  }
+
+  static int _levenshtein(String s1, String s2) {
+    if (s1 == s2) return 0;
+    if (s1.isEmpty) return s2.length;
+    if (s2.isEmpty) return s1.length;
+
+    List<int> v0 = List<int>.generate(s2.length + 1, (i) => i);
+    List<int> v1 = List<int>.filled(s2.length + 1, 0);
+
+    for (int i = 0; i < s1.length; i++) {
+      v1[0] = i + 1;
+      for (int j = 0; j < s2.length; j++) {
+        int cost = (s1[i] == s2[j]) ? 0 : 1;
+        v1[j + 1] = math.min(
+          v1[j] + 1,
+          math.min(
+            v0[j + 1] + 1,
+            v0[j] + cost,
+          ),
+        );
+      }
+      v0 = List<int>.from(v1);
+    }
+    return v0[s2.length];
+  }
+
+  static FillInBlankData generateFillInBlankData(String answer) {
+    final trimmed = answer.trim();
+    if (trimmed.isEmpty) {
+      return FillInBlankData(blankedSentence: '', blankedWords: []);
+    }
+
+    final stopWords = {
+      'is', 'a', 'an', 'the', 'are', 'was', 'were', 'of', 'in', 'on', 'at', 'by',
+      'for', 'with', 'about', 'against', 'between', 'into', 'through', 'during',
+      'before', 'after', 'above', 'below', 'to', 'from', 'up', 'down', 'out',
+      'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there',
+      'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more',
+      'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same',
+      'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', 'should',
+      'now', 'and', 'or', 'but', 'if', 'this', 'that', 'these', 'those'
+    };
+
+    final tokens = trimmed.split(RegExp(r'\s+'));
+    List<MapEntry<int, String>> candidates = [];
+
+    for (int i = 0; i < tokens.length; i++) {
+      final token = tokens[i];
+      final cleanWord = token.replaceAll(RegExp(r'[^\w]'), '').toLowerCase();
+      if (cleanWord.length >= 3 && !stopWords.contains(cleanWord)) {
+        candidates.add(MapEntry(i, cleanWord));
+      }
+    }
+
+    if (candidates.isEmpty) {
+      for (int i = 0; i < tokens.length; i++) {
+        final token = tokens[i];
+        final cleanWord = token.replaceAll(RegExp(r'[^\w]'), '').toLowerCase();
+        if (cleanWord.isNotEmpty) {
+          candidates.add(MapEntry(i, cleanWord));
+        }
+      }
+    }
+
+    // Sort by length descending
+    candidates.sort((a, b) => b.value.length.compareTo(a.value.length));
+
+    int numBlanks = 1;
+    if (tokens.length >= 10) {
+      numBlanks = 3;
+    } else if (tokens.length >= 5) {
+      numBlanks = 2;
+    }
+
+    if (numBlanks > candidates.length) {
+      numBlanks = candidates.length;
+    }
+
+    final selectedCandidates = candidates.take(numBlanks).toList();
+    selectedCandidates.sort((a, b) => a.key.compareTo(b.key));
+
+    final blankedIndices = selectedCandidates.map((entry) => entry.key).toSet();
+    final blankedWords = selectedCandidates.map((entry) => entry.value).toList();
+
+    final List<String> blankedTokens = [];
+    for (int i = 0; i < tokens.length; i++) {
+      if (blankedIndices.contains(i)) {
+        final originalToken = tokens[i];
+        final cleanWord = originalToken.replaceAll(RegExp(r'[^\w]'), '');
+        final punctuationStart = originalToken.indexOf(cleanWord);
+        final punctuationEnd = punctuationStart + cleanWord.length;
+
+        final leadingPunct = punctuationStart > 0 ? originalToken.substring(0, punctuationStart) : '';
+        final trailingPunct = punctuationEnd < originalToken.length ? originalToken.substring(punctuationEnd) : '';
+
+        blankedTokens.add('${leadingPunct}_______$trailingPunct');
+      } else {
+        blankedTokens.add(tokens[i]);
+      }
+    }
+
+    return FillInBlankData(
+      blankedSentence: blankedTokens.join(' '),
+      blankedWords: blankedWords,
+    );
+  }
+
+  static bool isFillInBlankCorrect(String userInput, String correctAnswer) {
+    if (isCloseMatch(userInput, correctAnswer)) {
+      return true;
+    }
+
+    final data = generateFillInBlankData(correctAnswer);
+    final targetWords = data.blankedWords;
+
+    final userTokens = userInput
+        .split(RegExp(r'[\s,;\-\.]+'))
+        .map((t) => t.replaceAll(RegExp(r'[^\w]'), '').toLowerCase())
+        .where((t) => t.isNotEmpty)
+        .toList();
+
+    if (userTokens.length < targetWords.length) {
+      return false;
+    }
+
+    int targetIdx = 0;
+    for (final userToken in userTokens) {
+      if (targetIdx < targetWords.length) {
+        if (isCloseMatch(userToken, targetWords[targetIdx])) {
+          targetIdx++;
+        }
+      }
+    }
+
+    return targetIdx == targetWords.length;
+  }
 }
 
 class _QuizScreenState extends State<QuizScreen> {
@@ -232,7 +391,9 @@ class _QuizScreenState extends State<QuizScreen> {
 
     final question = _quizQuestions[_currentIndex];
     final answerText = _textController.text;
-    final isCorrect = isCloseMatch(answerText, question.correctAnswer);
+    final isCorrect = question.type == QuestionType.fillInBlank
+        ? QuizScreen.isFillInBlankCorrect(answerText, question.correctAnswer)
+        : QuizScreen.isCloseMatch(answerText, question.correctAnswer);
 
     setState(() {
       _hasAnswered = true;
@@ -391,58 +552,7 @@ class _QuizScreenState extends State<QuizScreen> {
     }
   }
 
-  bool isCloseMatch(String input, String expected) {
-    final cleanInput = input.trim().toLowerCase().replaceAll(RegExp(r'[^\w\s]'), '');
-    final cleanExpected = expected.trim().toLowerCase().replaceAll(RegExp(r'[^\w\s]'), '');
 
-    if (cleanInput == cleanExpected) return true;
-
-    final distance = _levenshtein(cleanInput, cleanExpected);
-    final maxLength = math.max(cleanInput.length, cleanExpected.length);
-    if (maxLength == 0) return true;
-    final similarity = 1.0 - (distance / maxLength);
-    return similarity >= 0.85; // Slightly tighten the similarity threshold to 85% for better accuracy
-  }
-
-  int _levenshtein(String s1, String s2) {
-    if (s1 == s2) return 0;
-    if (s1.isEmpty) return s2.length;
-    if (s2.isEmpty) return s1.length;
-
-    List<int> v0 = List<int>.generate(s2.length + 1, (i) => i);
-    List<int> v1 = List<int>.filled(s2.length + 1, 0);
-
-    for (int i = 0; i < s1.length; i++) {
-      v1[0] = i + 1;
-      for (int j = 0; j < s2.length; j++) {
-        int cost = (s1[i] == s2[j]) ? 0 : 1;
-        v1[j + 1] = math.min(
-          v1[j] + 1,
-          math.min(
-            v0[j + 1] + 1,
-            v0[j] + cost,
-          ),
-        );
-      }
-      v0 = List<int>.from(v1);
-    }
-    return v0[s2.length];
-  }
-
-  String getBlankHint(String answer) {
-    final words = answer.split(' ');
-    final hintWords = words.map((word) {
-      if (word.length <= 2) {
-        return word;
-      }
-      final firstChar = word.substring(0, 1);
-      final lastChar = word.substring(word.length - 1);
-      final blanks = '_' * (word.length - 2);
-      final formattedBlanks = blanks.split('').join(' ');
-      return '$firstChar $formattedBlanks $lastChar';
-    });
-    return hintWords.join('   ');
-  }
 
   void _showResultDialog() {
     showDialog(
@@ -751,6 +861,7 @@ class _QuizScreenState extends State<QuizScreen> {
 
   Widget _buildFillInBlank(QuizQuestion question) {
     final theme = Theme.of(context);
+    final fillInData = QuizScreen.generateFillInBlankData(question.correctAnswer);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -766,7 +877,7 @@ class _QuizScreenState extends State<QuizScreen> {
           child: Column(
             children: [
               Text(
-                'LETTER HINT',
+                'FILL IN THE SPACE',
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
@@ -774,15 +885,14 @@ class _QuizScreenState extends State<QuizScreen> {
                   color: theme.colorScheme.primary.withValues(alpha: 0.6),
                 ),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               SelectableText(
-                getBlankHint(question.correctAnswer),
+                fillInData.blankedSentence,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1.8,
-                  fontFamily: 'Courier',
+                  fontSize: 18,
+                  fontWeight: FontWeight.w500,
+                  height: 1.5,
                   color: theme.colorScheme.onSurface,
                 ),
               ),
@@ -795,7 +905,7 @@ class _QuizScreenState extends State<QuizScreen> {
           focusNode: _focusNode,
           enabled: !_hasAnswered,
           decoration: InputDecoration(
-            hintText: 'Type your answer...',
+            hintText: 'Type missing words (e.g. word1, word2) or full answer...',
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(16),
             ),
@@ -861,7 +971,9 @@ class _QuizScreenState extends State<QuizScreen> {
 
   Widget _buildPostAnswerFeedback(QuizQuestion question) {
     final theme = Theme.of(context);
-    final isCorrect = _selectedAnswer != null && isCloseMatch(_selectedAnswer!, question.correctAnswer);
+    final isCorrect = _selectedAnswer != null && (question.type == QuestionType.fillInBlank
+        ? QuizScreen.isFillInBlankCorrect(_selectedAnswer!, question.correctAnswer)
+        : QuizScreen.isCloseMatch(_selectedAnswer!, question.correctAnswer));
 
     return Container(
       padding: const EdgeInsets.all(16),
